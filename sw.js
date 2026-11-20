@@ -1,5 +1,7 @@
-const CACHE = "dodocam-v2";
-const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const CACHE = "dodocam-v3";
+const SHELL = ["./", "index.html", "css/style.css", "manifest.webmanifest", "icon-192.png", "icon-512.png",
+  "vendor/qrcode.min.js", "vendor/jsqr.min.js",
+  "js/util.js", "js/sounds.js", "js/qr.js", "js/relay.js", "js/rtc.js", "js/baby.js", "js/parent.js", "js/app.js"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -12,7 +14,7 @@ self.addEventListener("fetch", e => {
   if (r.method !== "GET" || new URL(r.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(r).then(res => { if (res && res.ok) { const c = res.clone(); caches.open(CACHE).then(x => x.put(r, c)); } return res; })
-      .catch(() => caches.match(r).then(m => m || caches.match("index.html")))
+      .catch(() => caches.match(r, { ignoreSearch: true }).then(m => m || caches.match("index.html")))
   );
 });
 // Toucher la notification ramène sur l'appli.
