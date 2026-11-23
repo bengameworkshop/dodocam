@@ -5,7 +5,9 @@
 /* Réglages mémorisés */
 const S = {
   thr: store.get('thr', 55), dur: store.get('dur', 3), det: store.get('det', 'cry'),
-  motion: store.get('motion', false), msens: store.get('msens', 'mid'),
+  msens: store.get('msens', 'mid'),
+  // Alertes activables une par une
+  al: Object.assign({ wake: true, stir: true, motion: store.get('motion', false), lost: true, unplug: true, lowbat: true }, store.get('al', {})),
   ring: store.get('ring', 'chime'), vol: store.get('vol', 80), vib: store.get('vib', false),
   bright: store.get('bright', 0), bw: store.get('bw', false),
   sound: true, image: true, alert: true
@@ -18,7 +20,7 @@ const CRY_MIN = 35;                                 // score de pleurs minimum
 const C = {
   manual: false, relay: null, pc: null, dc: null, sid: null, remote: new MediaStream(),
   live: false, everLive: false, lastMsg: 0, dropAt: null, timer: null, tries: 0, lastAttempt: 0,
-  babyMode: 'av', babyWake: null, bat: null, lastLevelAt: 0
+  babyMode: 'av', babyWake: null, bat: null, lastLevelAt: 0, babyEco: false, babyDark: false
 };
 /* État des alertes */
 const A = { loudMs: 0, moveMs: 0, kind: null, loop: null, snoozeUntil: 0, softUntil: 0, lostAlarmed: false, lowBat: false };
@@ -96,7 +98,7 @@ function onLive(){
   addLog(again ? 'Reconnecté' : 'Connecté au téléphone bébé');
   if (A.kind === 'lost') stopAlarm();
   sendJSON(C.dc, { t: 'video', on: S.image });
-  attachRemote();
+  attachRemote(); updateRemote();
   if (!store.get('checkedOnce', false)){ store.set('checkedOnce', true); setTimeout(openCheck, 1500); }
 }
 function onDrop(){
@@ -104,7 +106,7 @@ function onDrop(){
   C.live = false; C.dropAt = Date.now();
   setPill('wait', C.manual ? 'Connexion coupée' : 'Reconnexion…');
   addLog('Connexion coupée, reconnexion…');
-  updateStage();
+  updateStage(); updateRemote();
   if (!C.manual){ C.tries = 0; C.lastAttempt = 0; attempt(); }
 }
 /* Surveillance : messages du bébé toutes les 250 ms ; silence = coupure */
@@ -122,7 +124,8 @@ setInterval(() => {
 function onBabyMsg(data){
   let m; try{ m = JSON.parse(data); }catch(_){ return; }
   C.lastMsg = Date.now();
-  if (m.t === 'hello'){ C.babyMode = m.mode; C.babyWake = m.w; if (m.bat) onBattery(m.bat); updateStage(); }
+  if (m.t === 'hello'){ C.babyMode = m.mode; C.babyWake = m.w; if (m.bat) onBattery(m.bat); C.babyEco = !!m.eco; C.babyDark = !!m.dark; updateStage(); updateRemote(); }
+  else if (m.t === 'state'){ C.babyEco = !!m.eco; C.babyDark = !!m.dark; updateRemote(); }
   else if (m.t === 'l') onLevel(m.v, m.c || 0, m.m || 0);
   else if (m.t === 'b'){ onBattery(m); if ('w' in m) C.babyWake = m.w; }
   else if (m.t === 's') C.babyWake = m.w;
@@ -147,16 +150,18 @@ function onLevel(v, c, mv){
   // Compteurs tolérants : un pleur a des pauses pour respirer.
   const loud = v >= S.thr && (S.det === 'all' || cryOn);
   A.loudMs = loud ? A.loudMs + 250 : Math.max(0, A.loudMs - 90);
-  A.moveMs = S.motion && moveOn ? A.moveMs + 250 : Math.max(0, A.moveMs - 90);
+  A.moveMs = S.al.motion && moveOn ? A.moveMs + 250 : Math.max(0, A.moveMs - 90);
 
   const now = Date.now(), need = S.dur * 1000, early = Math.max(600, need * 0.35);
-  if (!S.alert || A.kind || calib || now < A.snoozeUntil) return;
-  if (A.loudMs >= need){ A.loudMs = 0; triggerAlarm(cryOn || S.det === 'cry' ? 'cry' : 'noise'); }
+  if (!S.alert || (A.kind && A.kind !== 'soft') || calib || now < A.snoozeUntil) return;
+  if (A.loudMs >= need && S.al.wake){ A.loudMs = 0; triggerAlarm(cryOn || S.det === 'cry' ? 'cry' : 'noise'); }
   else if (A.moveMs >= need){ A.moveMs = 0; triggerAlarm('motion'); }
-  else if ((A.loudMs >= early || A.moveMs >= early) && now >= A.softUntil){
+  else if (S.al.stir && ((S.al.wake && A.loudMs >= early) || A.moveMs >= early) && now >= A.softUntil){
     // Alerte progressive : d'abord un petit signal discret.
     A.softUntil = now + 30000;
-    addLog("Bébé s'agite"); toast("👶 Bébé s'agite…", 4000);
+    addLog("Bébé s'agite");
+    A.kind = 'soft'; showBar('soft', '👶', "Bébé s'agite…", 'Un peu de bruit ou de mouvement. Je sonne si ça dure.', 'OK');
+    clearTimeout(A.softTimer); A.softTimer = setTimeout(() => { if (A.kind === 'soft') stopAlarm(); }, 10000);
     if (!S.vib) playRing(S.ring, S.vol / 100, true);
     if (navigator.vibrate) navigator.vibrate(200);
   }
@@ -171,20 +176,31 @@ const ALARMS = {
   unplugged: ['🔌', 'Téléphone bébé débranché', "Il n'est plus en charge. Rebranche-le pour qu'il tienne jusqu'au bout."],
   lowbat: ['🪫', 'Batterie faible', 'Le téléphone bébé est à {x} %. Branche-le vite.']
 };
+const ALARM_KEY = { noise: 'wake', cry: 'wake', motion: 'motion', lost: 'lost', unplugged: 'unplug', lowbat: 'lowbat' };
+const ALARM_STYLE = { noise: 'wake', cry: 'wake', motion: 'wake', lost: 'conn', unplugged: 'info', lowbat: 'info' };
+function showBar(kind, ico, title, txt, ok){
+  const bar = $('#alertBar');
+  bar.className = 'alertbar k-' + kind;
+  $('#abIco').textContent = ico; $('#abTitle').textContent = title; $('#abTxt').textContent = txt; $('#abOk').textContent = ok;
+  bar.hidden = false;
+  $('#sleep').hidden = true; // si l'écran était assombri, on le rallume
+}
 function triggerAlarm(kind, x){
-  if (A.kind) return;
+  if (!S.al[ALARM_KEY[kind]]) return;           // alerte désactivée par le parent
+  if (A.kind && A.kind !== 'soft') return;      // une alerte est déjà affichée
+  clearTimeout(A.softTimer);
   A.kind = kind;
   const [ico, title, raw] = ALARMS[kind];
   const txt = raw.replace('{x}', kind === 'lost' ? (C.manual ? 'quelques secondes' : '20 secondes') : x);
-  $('#alarmIco').textContent = ico; $('#alarmTitle').textContent = title; $('#alarmTxt').textContent = txt;
-  $('#alarm').hidden = false;
-  if (['noise', 'cry', 'motion'].includes(kind)) addLog(title, true);
+  const wake = ['noise', 'cry', 'motion'].includes(kind);
+  showBar(ALARM_STYLE[kind], ico, title, txt, wake ? "J'y vais" : 'OK');
+  if (wake) addLog(title, true);
   const ring = () => { if (!S.vib) playRing(S.ring, S.vol / 100); if (navigator.vibrate) navigator.vibrate([500, 200, 500]); };
   ring(); clearInterval(A.loop); A.loop = setInterval(ring, 2400);
   notify(title, txt);
 }
-function stopAlarm(){ clearInterval(A.loop); A.loop = null; A.kind = null; $('#alarm').hidden = true; if (navigator.vibrate) navigator.vibrate(0); }
-$('#alarmOk').onclick = () => {
+function stopAlarm(){ clearInterval(A.loop); A.loop = null; A.kind = null; $('#alertBar').hidden = true; if (navigator.vibrate) navigator.vibrate(0); }
+$('#abOk').onclick = () => {
   const k = A.kind; stopAlarm();
   if (['noise', 'cry', 'motion'].includes(k)){ A.snoozeUntil = Date.now() + 30000; A.loudMs = A.moveMs = 0; }
 };
@@ -260,8 +276,11 @@ const DET_HINT = {
 };
 segInit('detSeg', S.det, v => { S.det = v; save('det'); $('#detHint').textContent = DET_HINT[v]; });
 $('#detHint').textContent = DET_HINT[S.det];
-$('#motionChk').checked = S.motion; $('#msensSeg').hidden = !S.motion;
-$('#motionChk').onchange = e => { S.motion = e.target.checked; save('motion'); $('#msensSeg').hidden = !S.motion; };
+$$('[data-al]').forEach(c => {
+  const k = c.dataset.al; c.checked = !!S.al[k];
+  c.onchange = () => { S.al[k] = c.checked; store.set('al', S.al); if (k === 'motion') $('#msensSeg').hidden = !c.checked; if (!c.checked && ALARM_KEY[A.kind] === k) stopAlarm(); };
+});
+$('#msensSeg').hidden = !S.al.motion;
 segInit('msensSeg', S.msens, v => { S.msens = v; save('msens'); });
 segInit('ringSeg', S.ring, v => { S.ring = v; save('ring'); playRing(S.ring, S.vol / 100); });
 const vol = $('#vol'); vol.value = S.vol; $('#volVal').textContent = S.vol + ' %';
@@ -280,6 +299,16 @@ $('#togSound').onclick = () => { S.sound = !S.sound; togSet('#togSound', S.sound
 $('#togImage').onclick = () => { S.image = !S.image; togSet('#togImage', S.image); sendJSON(C.dc, { t: 'video', on: S.image }); updateStage(); };
 $('#togAlert').onclick = () => { S.alert = !S.alert; togSet('#togAlert', S.alert); toast(S.alert ? 'Alertes activées' : 'Alertes de réveil coupées (les alertes de connexion restent)'); };
 $('#parentStop').onclick = () => location.reload();
+
+/* ---------- Téléphone bébé à distance ---------- */
+function updateRemote(){
+  $('#rDark').checked = C.babyDark; $('#rEco').checked = C.babyEco;
+  $('#rDark').disabled = $('#rEco').disabled = !C.live;
+}
+$('#rDark').onchange = e => { sendJSON(C.dc, { t: 'cmd', dark: e.target.checked }); toast(e.target.checked ? 'Écran du téléphone bébé en noir' : 'Écran du téléphone bébé rallumé'); };
+$('#rEco').onchange = e => { sendJSON(C.dc, { t: 'cmd', eco: e.target.checked }); toast(e.target.checked ? 'Mode économie activé sur le téléphone bébé' : 'Mode économie désactivé'); };
+updateRemote();
+$('#parentDark').onclick = () => { $('#sleepTxt').textContent = 'Dodocam surveille toujours 🌙'; $('#sleep').hidden = false; };
 
 /* ---------- Seuil automatique ---------- */
 $('#calibBtn').onclick = () => {

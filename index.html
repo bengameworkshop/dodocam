@@ -88,6 +88,8 @@
     <div class="indic"><span id="bCry">Pleurs</span><span id="bMove">Mouvement</span></div>
     <p class="hint" id="babyModeTxt"></p>
     <p class="hint" id="babyParents"></p>
+    <label class="switch">🔋 Mode économie de batterie<input type="checkbox" id="bEco"></label>
+    <p class="hint">Écran noir et image en qualité réduite. Les parents peuvent aussi l'activer depuis leur téléphone.</p>
   </div>
   <button class="btn lav" id="sleepBtn">🌙 Écran noir (économie)</button>
   <div class="btnrow"><button class="btn ghost" id="addParent">➕ Ajouter un parent</button><button class="btn ghost" id="babyStop">Arrêter</button></div>
@@ -119,6 +121,11 @@
 
 <section class="screen" id="parentLive" hidden>
   <div class="topbar"><h2 style="margin:0">🌙 Bébé</h2><div class="pills"><span class="pill plain" id="batPill" hidden></span><span class="pill wait" id="parentPill">Recherche…</span></div></div>
+  <div class="alertbar" id="alertBar" hidden>
+    <div class="ai" id="abIco">👶</div>
+    <div class="at"><b id="abTitle"></b><small id="abTxt"></small></div>
+    <button class="btn small" id="abOk">J'y vais</button>
+  </div>
   <div class="stage">
     <video id="remoteVideo" playsinline autoplay></video>
     <div class="audioviz" id="audioViz" hidden><div class="glow" id="glow"></div></div>
@@ -148,10 +155,16 @@
     <div class="row" style="display:block"><label>Réagir à</label>
       <div class="seg sm" id="detSeg" style="margin-top:8px"><button data-v="cry">Pleurs seulement</button><button data-v="all">Tout bruit</button></div></div>
     <p class="hint" id="detHint"></p>
+    <h3 style="margin-top:18px">Alertes actives</h3>
+    <label class="switch">😢 Réveil (pleurs ou bruit)<input type="checkbox" data-al="wake"></label>
+    <label class="switch">👶 « Bébé s'agite » (petit signal avant)<input type="checkbox" data-al="stir"></label>
     <div id="motionSet">
-      <label class="switch">Alerter aussi si bébé bouge<input type="checkbox" id="motionChk"></label>
+      <label class="switch">🧸 Bébé bouge<input type="checkbox" data-al="motion"></label>
       <div class="seg sm" id="msensSeg"><button data-v="low">Peu sensible</button><button data-v="mid">Moyen</button><button data-v="high">Très sensible</button></div>
     </div>
+    <label class="switch">📡 Connexion perdue<input type="checkbox" data-al="lost"></label>
+    <label class="switch">🔌 Téléphone bébé débranché<input type="checkbox" data-al="unplug"></label>
+    <label class="switch">🪫 Batterie faible (20 %)<input type="checkbox" data-al="lowbat"></label>
     <details class="set"><summary>🔔 Sonnerie</summary>
       <div class="seg sm" id="ringSeg" style="margin-top:10px"><button data-v="chime">Carillon</button><button data-v="soft">Douce</button><button data-v="beep">Bip</button></div>
       <div class="row"><label for="vol">Volume</label><b id="volVal"></b></div>
@@ -165,6 +178,13 @@
       <label class="switch">Noir et blanc (moins de grain)<input type="checkbox" id="bwChk"></label>
     </details>
   </div>
+  <div class="card">
+    <h3>📱 Téléphone bébé, à distance</h3>
+    <label class="switch">Écran noir<input type="checkbox" id="rDark"></label>
+    <label class="switch">Mode économie de batterie<input type="checkbox" id="rEco"></label>
+    <p class="hint">Le mode économie met l'écran du téléphone bébé en noir et réduit la qualité de l'image. Le son et les alertes restent pareils.</p>
+  </div>
+  <button class="btn lav" id="parentDark">🌙 Assombrir ce téléphone</button>
   <div class="card">
     <h3 id="sessTitle">Journal de la session</h3>
     <ul class="log" id="log"></ul>
@@ -196,13 +216,6 @@
   </div>
 </div>
 
-<div class="overlay" id="alarm" hidden>
-  <div class="big" id="alarmIco">👶</div>
-  <h2 id="alarmTitle">Bébé se réveille</h2>
-  <p id="alarmTxt"></p>
-  <button class="btn" id="alarmOk" style="max-width:320px">J'y vais 💛</button>
-</div>
-
 <div class="overlay" id="dialog" hidden>
   <div class="box">
     <h2 id="dlgTitle"></h2><p id="dlgTxt"></p>
@@ -220,7 +233,7 @@
   </div>
 </div>
 
-<div class="overlay" id="sleep" hidden><p>Je veille toujours 🌙<br>Touche deux fois pour rallumer</p></div>
+<div class="overlay" id="sleep" hidden><p><span id="sleepTxt">Je veille toujours 🌙</span><br>Touche deux fois pour rallumer</p></div>
 <div id="toast" hidden></div>
 <video id="anVideo" playsinline muted></video>
 

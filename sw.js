@@ -1,4 +1,4 @@
-const CACHE = "dodocam-v3";
+const CACHE = "dodocam-v4";
 const SHELL = ["./", "index.html", "css/style.css", "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "vendor/qrcode.min.js", "vendor/jsqr.min.js",
   "js/util.js", "js/sounds.js", "js/qr.js", "js/relay.js", "js/rtc.js", "js/baby.js", "js/parent.js", "js/app.js"];

@@ -28,7 +28,7 @@ Ouvre ce lien sur tes téléphones (Chrome sur Android, Safari sur iPhone), puis
 | `js/app.js` | Accueil et installation |
 | `sw.js` | Fonctionnement en appli installée |
 
-Après une modification, change le numéro de version dans `sw.js` (`dodocam-v3` → `dodocam-v4`) pour que les téléphones prennent bien la nouvelle version.
+Après une modification, change le numéro de version dans `sw.js` (`dodocam-v4` → `dodocam-v5`) pour que les téléphones prennent bien la nouvelle version.
 
 ---
 

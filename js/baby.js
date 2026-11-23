@@ -6,7 +6,8 @@
 const B = {
   mode: store.get('babyMode', 'av'), cam: store.get('babyCam', 'environment'),
   stream: null, peers: new Map(), relay: null, manual: false,
-  lvl: 0, cry: 0, move: 0, bat: null
+  lvl: 0, cry: 0, move: 0, bat: null,
+  eco: store.get('babyEco', false), dark: false
 };
 
 segInit('modeSeg', B.mode, v => { B.mode = v; store.set('babyMode', v); $('#camPick').hidden = v === 'a'; });
@@ -27,6 +28,7 @@ async function babyMedia(){
   startBattery();
   keepAwake();
   setInterval(() => broadcast({ t: 's', w: awakeOk() }), 15000);
+  setEco(B.eco, true);
   $('#babyModeTxt').textContent = { av: "Je transmets le son et l'image.", a: 'Je transmets le son uniquement.', v: "Je transmets l'image uniquement (le bruit est quand même mesuré)." }[B.mode];
 }
 
@@ -71,11 +73,13 @@ async function babyHandleOffer(pid, offer){
   pc.ondatachannel = e => {
     peer.dc = e.channel;
     peer.dc.onopen = () => {
-      sendJSON(peer.dc, { t: 'hello', mode: B.mode, w: awakeOk(), bat: B.bat });
+      sendJSON(peer.dc, { t: 'hello', mode: B.mode, w: awakeOk(), bat: B.bat, eco: B.eco, dark: B.dark });
+      applyQuality();
       store.set('babyHasParent', true); updateBabyUI();
       toast('Parent connecté ✓');
     };
-    peer.dc.onmessage = ev => { let o; try{ o = JSON.parse(ev.data); }catch(_){ return; } if (o.t === 'video' && peer.vt) peer.vt.enabled = !!o.on; };
+    peer.dc.onmessage = ev => { let o; try{ o = JSON.parse(ev.data); }catch(_){ return; } if (o.t === 'video' && peer.vt) peer.vt.enabled = !!o.on;
+      if (o.t === 'cmd'){ if ('eco' in o) setEco(!!o.eco); else if ('dark' in o) setDark(!!o.dark); } };
     peer.dc.onclose = () => { if (B.peers.get(pid) === peer) dropPeer(pid); };
   };
   pc.onconnectionstatechange = () => { if (['failed', 'closed'].includes(pc.connectionState) && B.peers.get(pid) === peer) dropPeer(pid); };
@@ -164,9 +168,9 @@ function startAnalysis(){
     const v = $('#anVideo'); v.srcObject = new MediaStream([vt]); v.play().catch(() => {});
     const cv = document.createElement('canvas'); cv.width = 48; cv.height = 36;
     const cx = cv.getContext('2d', { willReadFrequently: true });
-    let prev = null;
+    let prev = null, tick = 0;
     setInterval(() => {
-      if (v.readyState < 2) return;
+      if (v.readyState < 2 || (B.eco && ++tick % 2)) return;
       cx.drawImage(v, 0, 0, 48, 36);
       const d = cx.getImageData(0, 0, 48, 36).data, g = new Uint8Array(48 * 36);
       let changed = 0;
@@ -192,9 +196,36 @@ async function startBattery(){
   }catch(e){}
 }
 
-/* ---------- Écran noir ---------- */
-$('#sleepBtn').onclick = () => { $('#sleep').hidden = false; };
-$('#sleep').ondblclick = () => { $('#sleep').hidden = true; };
+/* ---------- Écran noir et mode économie (pilotables depuis les parents) ---------- */
+const sendState = () => broadcast({ t: 'state', eco: B.eco, dark: B.dark });
+function setDark(on){
+  B.dark = on;
+  $('#sleepTxt').textContent = B.eco ? 'Mode économie · je veille toujours 🌙' : 'Je veille toujours 🌙';
+  $('#sleep').hidden = !on;
+  sendState();
+}
+function setEco(on, silent){
+  B.eco = on; store.set('babyEco', on); $('#bEco').checked = on;
+  applyQuality();
+  if (!silent || (on && store.get('babyHasParent', false))) setDark(on); else sendState();
+  if (!silent) toast(on ? '🔋 Mode économie activé' : 'Mode économie désactivé');
+}
+/* Économie : image 320×240 à 8 images/s et débit limité, sinon 640×480 à 15 images/s */
+function applyQuality(){
+  const c = B.eco ? { width: 320, height: 240, frameRate: 8 } : { width: 640, height: 480, frameRate: 15 };
+  const rate = B.eco ? 150000 : 600000;
+  const tracks = [B.stream && B.stream.getVideoTracks()[0], ...[...B.peers.values()].map(p => p.vt)].filter(Boolean);
+  tracks.forEach(tr => tr.applyConstraints({ width: { ideal: c.width }, height: { ideal: c.height }, frameRate: { ideal: c.frameRate, max: c.frameRate } }).catch(() => {}));
+  B.peers.forEach(p => p.pc.getSenders().forEach(s => {
+    if (!s.track || s.track.kind !== 'video') return;
+    try{ const prm = s.getParameters(); if (!prm.encodings || !prm.encodings.length) prm.encodings = [{}]; prm.encodings[0].maxBitrate = rate; s.setParameters(prm).catch(() => {}); }catch(e){}
+  }));
+}
+$('#bEco').onchange = e => setEco(e.target.checked);
+$('#sleepBtn').onclick = () => setDark(true);
+// Double-toucher pour rallumer (sur le téléphone bébé comme sur le parent)
+const wakeScreen = () => { if (B.stream) setDark(false); else $('#sleep').hidden = true; };
+$('#sleep').ondblclick = wakeScreen;
 let lastTap = 0;
-$('#sleep').addEventListener('touchend', e => { const n = Date.now(); if (n - lastTap < 400){ $('#sleep').hidden = true; e.preventDefault(); } lastTap = n; });
+$('#sleep').addEventListener('touchend', e => { const n = Date.now(); if (n - lastTap < 400){ wakeScreen(); e.preventDefault(); } lastTap = n; });
 $('#babyStop').onclick = () => location.reload();
